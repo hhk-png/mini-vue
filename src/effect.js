@@ -154,7 +154,7 @@ function iteratationMethod() {
     }
 }
 
-function track(target, key) {
+export function track(target, key) {
     // 当禁止追踪时，直接返回
     if (!activeEffect || !shouleTrack) {
         return
@@ -456,7 +456,7 @@ function createReactive(obj, isShallow = false, isReadonly = false) {
     })
 }
 
-function reactive(obj) {
+export function reactive(obj) {
     const existionProxy = reactiveMap.get(obj)
     if (existionProxy) return existionProxy
 
@@ -466,7 +466,7 @@ function reactive(obj) {
     return proxy
 }
 
-function shallow(obj) {
+function shallowReactive(obj) {
     return createReactive(obj, true)
 }
 
@@ -477,8 +477,6 @@ function readonly(obj) {
 function shallowReadonly(obj) {
     return createReactive(obj, true /* shallow */, true)
 }
-
-
 
 function createMutableReactive(obj, isShallow = false, isReadonly = false) {
     return new Proxy(obj, {
