@@ -1,6 +1,6 @@
 import { reactive } from "./effect"
 
-function ref(val) {
+export function ref(val) {
     const wrapper = {
         value: val
     }
@@ -11,7 +11,7 @@ function ref(val) {
     return reactive(wrapper)
 }
 
-function toRef(obj, key) {
+export function toRef(obj, key) {
     const wrapper = {
         get value() {
             return obj[key]
@@ -27,7 +27,7 @@ function toRef(obj, key) {
     return wrapper
 }
 
-function toRefs(obj) {
+export function toRefs(obj) {
     const res = {}
     for (const key in obj) {
         res[key] = toRef(obj, key)
@@ -36,7 +36,7 @@ function toRefs(obj) {
     return res
 }
 
-function proxyRefs(target) {
+export function proxyRefs(target) {
     return new Proxy(target, {
         get(target, key, receiver) {
             const value = Reflect.get(target, key, receiver)

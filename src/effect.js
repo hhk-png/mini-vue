@@ -250,7 +250,7 @@ function trigger(target, key, type, newVal) {
     })
 }
 
-function effect(fn, options = {}) {
+export function effect(fn, options = {}) {
     const effectFn = () => {
         cleanup(effectFn)
         activeEffect = effectFn
