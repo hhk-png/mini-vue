@@ -1,10 +1,19 @@
+import { effect, reactive, shallowReactive, shallowReadonly } from "./effect"
+import { queueJob } from "./queueJob"
 
 // 文本节点的 type 标识
 export const Text = Symbol()
 // Fragment
 export const Fragment = Symbol()
+// 全局变量，存储当前正在被初始化的组件实例
+
 
 export function createRenderer(options) {
+    const currentInstance = null
+
+    function setCurrentInstance(instance) {
+        currentInstance = instance
+    }
 
     const {
         createElement,
@@ -194,7 +203,6 @@ export function createRenderer(options) {
                 }
             }
         }
-
     }
 
     function patchChildren(n1, n2, container) {
@@ -237,7 +245,204 @@ export function createRenderer(options) {
         patchChildren(n1, n2, el)
     }
 
-    function patch(n1, n2, container) {
+    // 当前组件的props，传递过来的props
+    function resolveProps(options, propsData) {
+        const props = {}
+        const attrs = {}
+        for (const key in propsData) {
+            // 以字符串 on 开头的 props，无论是否显式地声明，
+            //  都将其添加到 props 数据中，而不是添加到 attrs 中
+            if (key in options || key.startsWith('on')) {
+                // 如果为组件传递的 props 数据在组件自身的 props 选项中有定义
+                //  则将其视为合法的 props
+                props[key] = propsData[key]
+            } else {
+                // 否则将其作为 attrs
+                attrs[key] = propsData[key]
+            }
+        }
+
+        return [props, attrs]
+    }
+
+    // 挂载组件
+    function mountComponent(vnode, container, anchor) {
+        const componentOptions = vnode.type
+        const { render, data, setup, props: propsOption,
+            beforeCreate, created, beforeMount, 
+            mounted, beforeUpdate, updated } = componentOptions
+        
+        // beforeCreate 钩子
+        beforeCreate && beforeCreate()
+
+        // 调用data 函数得到原始数据，并调用 reactive 函数将其包装为响应式数据
+        const state = data ? reactive(data()) : null
+        const [props, attrs] = resolveProps(propsOption, vnode.props)
+        
+        // 直接使用编译好的 vnode.children 对象作为slots 对象即可
+        const slots = vnode.children || {}
+        
+        // 定义组件实例，包含与组件有关的状态信息
+        const instance = {
+            // data
+            state,
+            props: shallowReactive(props),
+            isMounted: false,
+            subTree: null,
+            slots,
+            // 在组件实例中添加mounted 数组，用来存储通过onMounted 函数注册的生命周期函数
+            mounted: []
+        }
+
+        function onMounted(fn) {
+            if (currentInstance) {
+                currentInstance.mounted.push(fn)
+            } else {
+                console.error('onMounted 函数只能在 setup 函数中调用')
+            }
+        }
+
+        // 自定义事件
+        function emit(event, ...payload) {
+            const eventName = `on${event[0].toUpperCase() + event.slice(1)}`
+            // 根据处理后的事件名称去 props 中寻找对应的事件处理函数
+            const handler = instance.props[eventName]
+            if (handler) {
+                handler(...payload)
+            } else {
+                console.error('事件不存在')
+            }
+        }
+
+        // setup
+        // setupContext
+        const setupContext = { attrs, emit, slots }
+        // setup 函数调用之前，设置当前组件实例
+        setCurrentInstance(instance)
+        // 执行 setup 函数
+        const setupResult = setup(shallowReadonly(instance.props), setupContext)
+        setCurrentInstance(null)
+        // 存储由 setup 返回的数据
+        let setupState = null
+        // 如果 setup 函数的返回值是函数，则将其作为渲染函数
+        if (typeof setupResult === 'function') {
+            if (render) {
+                console.error('setup 函数返回渲染函数，render 选项将被忽略')
+            }
+            render = setupResult
+        } else {
+            // 如果 setup 的返回值不是函数，则作为数据状态赋值给 setupState
+            setupState = setupResult
+        }
+
+        // 将组件实例设置到 vnode 上，用于后续个更新
+        vnode.component = instance
+
+        // 创建渲染上下文对象，本质上是组件实例的代理
+        const renderContext = new Proxy(instance, {
+            get(target, key, receiver) {
+                const { state, props, slots } = target
+                // 当 key 的值为 $slots 时，直接返回组件实例上的 slots
+                if (key === '$slots') {
+                    return slots
+                }
+                if (state && key in state) {
+                    return state[key]
+                } else if (key in props) {
+                    return props[key]
+                } else if (setupState && key in setupState) {
+                    return setupState[key]
+                } else {
+                    console.error('不存在')
+                }
+            },
+            set(target, key, value, receiver) {
+                const { state, props } = target
+                if (state && key in props) {
+                    state[key] = value
+                } else if (key in props) {
+                    console.warn(`Attempting to mutate prop "${k}". Props are readonly.`)
+                } else if (setupState && key in setupState) {
+                    setupState[key] = value
+                }  else {
+                    console.error('不存在')
+                }
+            }
+        })
+
+        // created 钩子
+        //  生命周期函数调用时要绑定渲染上下文
+        created && created.call(renderContext)
+
+        // 当组件自身状态发生变化时，我们需要有能力触发组件更新，即软件的自更新
+        effect(() => {
+            // 执行渲染函数，获取组件要渲染的内容，即render 函数返回的虚拟DOM
+            //  将其 this 设置为 state
+            const subTree = render.call(state, state)
+            if (!instance.isMounted) {
+                // beforeMount 钩子
+                beforeMount && beforeMount.call(state)
+                patch(null, subTree, container, anchor)
+                // 将组件实例的 isMounted 设置为 true，
+                //  这样当更新发生时就不会再次进行挂载操作，而是会执行更新
+                instance.isMounted = true
+                // mounted 钩子
+                mounted && mounted.call(state)
+                instance.mounted && instance.mounted.forEach(hook => hook.call(renderContext))
+            } else {
+                // beforeUpdate 钩子
+                beforeUpdate && beforeUpdate.call(state)
+                // 更新操作
+                //  使用新的子树与上一次渲染的子树进行打补丁操作
+                patch(instance.subTree, subTree, container, anchor)
+                // updated 钩子
+                updated && updated.call(state)
+            }
+            // 更新组件实例的子树
+            instance.subTree = subTree
+        }, {
+            // 指定该副作用函数的调度器为 queueJob 即可
+            scheduler: queueJob
+        })
+    }
+
+    function hasPropsChanged(prevProps, nextProps) {
+        const nextKeys = Object.keys(nextProps)
+        // 数量发生变化，说明有变化
+        if (nextKeys.length !== Object.keys(prevProps).length) {
+            return true
+        }
+        for (let i = 0; i < nextKeys.length; i++) {
+            const key = nextKeys[i]
+            // 有不相等的 props，则说明有变化
+            if (nextKeys[key] !== prevProps[key]) {
+                return true
+            }
+        }
+        return false
+    }
+
+    function patchComponent(n1, n2, anchor) {
+        const instance = (n2.component = n1.component)
+        // 当前的 props
+        const { props } = instance
+        if (hasPropsChanged(n1.props, n2.props)) {
+            const [ nextProps ] = resolveProps(n2.type.props, n2.props)
+        
+            // 更新props
+            for (const key in nextProps) {
+                props[key] = nextProps[key]
+            }
+            // 删除不存在的props
+            for (const key in props) {
+                if (!(key in nextProps)) {
+                    delete props[key]
+                }
+            }
+        }
+    }
+
+    function patch(n1, n2, container, anchor) {
         // 如果n1 存在，则对比n1 和n2 的类型
         if (n1 && n1.type !== n2.type) {
             unmount(n1)
@@ -276,6 +481,13 @@ export function createRenderer(options) {
             }
         } else if (typeof type === 'object') {
             // 如果是对象，则是组件
+            if (!n1) {
+                // 挂载组件
+                mountComponent(n2, container, anchor)
+            } else {
+                // 更新组件
+                patchComponent(n1, n2, anchor)
+            }
         } else if (type === 'xxx') {
 
         }

@@ -466,7 +466,7 @@ export function reactive(obj) {
     return proxy
 }
 
-function shallowReactive(obj) {
+export function shallowReactive(obj) {
     return createReactive(obj, true)
 }
 
@@ -474,7 +474,7 @@ function readonly(obj) {
     return createReactive(obj, false, true /* 只读 */)
 }
 
-function shallowReadonly(obj) {
+export function shallowReadonly(obj) {
     return createReactive(obj, true /* shallow */, true)
 }
 
