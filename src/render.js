@@ -78,6 +78,8 @@ const renderer = createRenderer({
         }
     },
     unmount(vnode) {
+        // 判断 VNode 是否需要过渡处理
+        const needTransition = vnode.transition
         // Fragment
         if (vnode.type === Fragment) {
             vnode.children.forEach(c => unmount(c))
@@ -93,7 +95,15 @@ const renderer = createRenderer({
         }
         const parent = vnode.el.parentNode
         if (parent) {
-            parent.removeChild(vnode.el)
+            // 将卸载动作封装到 performRemove 函数中
+            const performRemove = () => {
+                parent.removeChild(vnode.el)
+            }
+            if (needTransition) {
+                vnode.transition.leave(vnode.el, performRemove)
+            } else {
+                performRemove()
+            }
         }
     }
 })

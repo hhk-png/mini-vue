@@ -16,7 +16,7 @@ export function createRenderer(options) {
         setText
     } = options
 
-    function mountElement(vnode, container) {
+    function mountElement(vnode, container, anchor) {
         // 创建元素，将元素添加到容器中
         const el = vnode.el = createElement(vnode.type)
 
@@ -35,7 +35,15 @@ export function createRenderer(options) {
             }
         }
 
-        insert(el, container)
+        const needTransition = vnode.transition
+        if (needTransition) {
+            vnode.transition.beforeEnter(el)
+        }
+
+        insert(el, container, anchor)
+        if (needTransition) {
+            vnode.transition.enter(el)
+        }
     }
 
     function getSequence(arr) {
