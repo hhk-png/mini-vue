@@ -500,8 +500,10 @@ export function createRenderer(options) {
                 unmount,
                 move(vnode, container, anchor) {
                     insert(
-                        vnode.component 
+                        vnode.component
+                            // 移动一个组件
                             ? vnode.component.subTree.el
+                            // 移动普通元素
                             : vnode.el,
                         container,
                         anchor
