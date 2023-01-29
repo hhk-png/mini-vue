@@ -1,4 +1,4 @@
-import { reactive } from "./effect"
+import { reactive, shallowReactive } from "./effect"
 
 export function ref(val) {
     const wrapper = {
@@ -9,6 +9,17 @@ export function ref(val) {
     })
 
     return reactive(wrapper)
+}
+
+export function shallowRef(val) {
+    const wrapper = {
+        value: val
+    }
+    Object.defineProperty(wrapper, '__v_isRef', {
+        value: true
+    })
+
+    return shallowReactive(wrapper)
 }
 
 export function toRef(obj, key) {

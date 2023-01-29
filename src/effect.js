@@ -1,11 +1,5 @@
-const data = { foo: 1, bar: 2 }
-const ITERATE_KEY = Symbol()
-const MAP_KEY_ITERATE_KEY = Symbol()
-const TriggerType = {
-    SET: 'SET',
-    ADD: 'ADD',
-    DELETE: 'DELETE'
-}
+import { TriggerType, ITERATE_KEY, MAP_KEY_ITERATE_KEY } from "./globalVariable"
+
 const bucket = new WeakMap()
 const log = console.log
 let activeEffect

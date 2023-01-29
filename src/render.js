@@ -2,7 +2,6 @@ import { effect } from "./effect"
 import { ref } from "./ref"
 import { createRenderer, Text, Fragment } from "./createRenderer"
 
-const count = ref(1)
 
 function shouldSetAsProps(el, key, value) {
     if (key === 'form' && el.tagName === 'INPUT') {
@@ -82,6 +81,9 @@ const renderer = createRenderer({
         // Fragment
         if (vnode.type === Fragment) {
             vnode.children.forEach(c => unmount(c))
+            return
+        } else if (typeof vnode.type === 'object') {
+            unmount(vnode.component.subTree)
             return
         }
         const parent = vnode.el.parentNode

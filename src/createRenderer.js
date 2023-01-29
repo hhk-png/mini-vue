@@ -1,19 +1,10 @@
 import { effect, reactive, shallowReactive, shallowReadonly } from "./effect"
 import { queueJob } from "./queueJob"
 
-// 文本节点的 type 标识
-export const Text = Symbol()
-// Fragment
-export const Fragment = Symbol()
-// 全局变量，存储当前正在被初始化的组件实例
-
+import { Text, Fragment, currentInstance, setCurrentInstance } from './globalVariable'
 
 export function createRenderer(options) {
-    const currentInstance = null
 
-    function setCurrentInstance(instance) {
-        currentInstance = instance
-    }
 
     const {
         createElement,
@@ -267,7 +258,17 @@ export function createRenderer(options) {
 
     // 挂载组件
     function mountComponent(vnode, container, anchor) {
+        const isFunctional = typeof vnode.type === 'function'
+
         const componentOptions = vnode.type
+        if (isFunctional) {
+            // 如果是函数式组件，则将 vnode.type 作为渲染函数，
+            //  将 vnode.type.props 作为 props 选项定义即可
+            componentOptions = {
+                render: vnode.type,
+                props: vnode.type.props
+            }
+        }
         const { render, data, setup, props: propsOption,
             beforeCreate, created, beforeMount, 
             mounted, beforeUpdate, updated } = componentOptions
@@ -479,7 +480,7 @@ export function createRenderer(options) {
             } else {
                 patchChildren(n1, n2, container)
             }
-        } else if (typeof type === 'object') {
+        } else if (typeof type === 'object' || typeof type === 'function') {
             // 如果是对象，则是组件
             if (!n1) {
                 // 挂载组件
