@@ -292,7 +292,20 @@ export function createRenderer(options) {
             subTree: null,
             slots,
             // 在组件实例中添加mounted 数组，用来存储通过onMounted 函数注册的生命周期函数
-            mounted: []
+            mounted: [],
+            // 只有 KeepAlive 组件的实例下会有 keepAliveCtx 属性
+            keepAliveCtx: null
+        }
+
+        // 检测是否是keepalive 组件
+        const isKeepAlive = vnode.type.__isKeepAlive
+        if (isKeepAlive) {
+            instance.keepAliveCtx = {
+                move(vnode, container, anchor) {
+                    insert(vnode.component.subTree.el, container, anchor)
+                },
+                createElement
+            }
         }
 
         function onMounted(fn) {
@@ -317,7 +330,7 @@ export function createRenderer(options) {
 
         // setup
         // setupContext
-        const setupContext = { attrs, emit, slots }
+        const setupContext = { attrs, emit, slots, onMounted }
         // setup 函数调用之前，设置当前组件实例
         setCurrentInstance(instance)
         // 执行 setup 函数
@@ -480,11 +493,30 @@ export function createRenderer(options) {
             } else {
                 patchChildren(n1, n2, container)
             }
+        } else if (typeof type === 'object' && type.__isTeleport) {
+            type.process(n1, n2, container, anchor, {
+                patch,
+                patchChildren,
+                unmount,
+                move(vnode, container, anchor) {
+                    insert(
+                        vnode.component 
+                            ? vnode.component.subTree.el
+                            : vnode.el,
+                        container,
+                        anchor
+                    )
+                }
+            })
         } else if (typeof type === 'object' || typeof type === 'function') {
             // 如果是对象，则是组件
             if (!n1) {
-                // 挂载组件
-                mountComponent(n2, container, anchor)
+                if (n2.keptAlive) {
+                    n2.keepAliveInstance._activate(n2, container, anchor)
+                } else {
+                    // 挂载组件
+                    mountComponent(n2, container, anchor)
+                }
             } else {
                 // 更新组件
                 patchComponent(n1, n2, anchor)

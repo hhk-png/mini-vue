@@ -83,7 +83,12 @@ const renderer = createRenderer({
             vnode.children.forEach(c => unmount(c))
             return
         } else if (typeof vnode.type === 'object') {
-            unmount(vnode.component.subTree)
+            if (vnode.shouldKeepAlive) {
+                // 对于需要被 KeepAlive 的组件，使其失活
+                vnode.keepAliveInstance._deActivate(vnode)
+            } else {
+                unmount(vnode.component.subTree)
+            }
             return
         }
         const parent = vnode.el.parentNode
