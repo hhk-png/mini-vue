@@ -1,3 +1,6 @@
+// 有 bug
+
+
 const TextModes = {
     DATA: 'DATA',
     RCDATA: 'RCDATA',
@@ -5,20 +8,78 @@ const TextModes = {
     CDATA: 'CDATA'
 }
 
+const namedCharacterReferences = {
+    "gt": ">",
+    "gt;": ">",
+    "lt": "<",
+    "lt;": "<",
+    "ltcc;": "⪦"
+}
+
+// 对应的替换码点
+const CCR_REPLACEMENTS = {
+    0x80: 0x20ac,
+    0x82: 0x201a,
+    0x83: 0x0192,
+    0x84: 0x201e,
+    0x85: 0x2026,
+    0x86: 0x2020,
+    0x87: 0x2021,
+    0x88: 0x02c6,
+    0x89: 0x2030,
+    0x8a: 0x0160,
+    0x8b: 0x2039,
+    0x8c: 0x0152,
+    0x8e: 0x017d,
+    0x91: 0x2018,
+    0x92: 0x2019,
+    0x93: 0x201c,
+    0x94: 0x201d,
+    0x95: 0x2022,
+    0x96: 0x2013,
+    0x97: 0x2014,
+    0x98: 0x02dc,
+    0x99: 0x2122,
+    0x9a: 0x0161,
+    0x9b: 0x203a,
+    0x9c: 0x0153,
+    0x9e: 0x017e,
+    0x9f: 0x0178
+}
+let index = 0
 function isEnd(context, ancestors) {
     // 当模板内容解析完毕后，停止
     if (!context.source) {
         return true
     }
-    const parent = ancestors[ancestors.length - 1]
-    // 如果遇到结束标签，并且该标签与父级标签节点同名，则停止
-    if (parent && context.source.startsWith(`</${parent.tag}`)) {
-        return true
+
+    // 与父级节点栈内所有节点作比较
+    for (let i = ancestors.length - 1; i >= 0; --i) {
+        console.log(index++)
+        // 只要栈中存在与当前结束标签同名的节点，就停止状态机
+        if (context.source.startsWith(`</${ancestors[i].tag}`)) {
+            return true
+        }
     }
+
+    // const parent = ancestors[ancestors.length - 1]
+    // // 如果遇到结束标签，并且该标签与父级标签节点同名，则停止
+    // if (parent && context.source.startsWith(`</${parent.tag}`)) {
+    //     return true
+    // }
 }
 
 function parseComment(context) {
-    
+    const {advanceBy, advanceSpaces} = context
+    advanceBy('<!--'.length)
+    closeIndex = context.source.indexOf('-->')
+    const content = context.source.slice(0, closeIndex)
+    advanceBy(content.length)
+    advanceBy('-->'.length)
+    return {
+        type: 'Comment',
+        content
+    }
 }
 
 function parseCDATA(context, ancestors) {
@@ -108,10 +169,6 @@ function parseTag(context, type = 'start') {
     }
 }
 
-function parseEndTag() {
-
-}
-
 function parseElement(context, ancestors) {
     const element = parseTag(context)
     if (element.isSelfClosing) {
@@ -145,7 +202,22 @@ function parseElement(context, ancestors) {
 }
 
 function parseInterpolation(context) {
-
+    context.advanceBy('{{'.length)
+    closeIndex = context.source.indexOf('}}')
+    if (closeIndex < 0) {
+        console.error('插值缺少结束定界符')
+    }
+    const content = context.source.slice(0, closeIndex)
+    context.advanceBy(content.length)
+    context.advanceBy('}}'.length)
+    return {
+        type: 'Interpolation',
+        content: {
+            type: 'Expression',
+            // 表达式节点的内容则是经过 HTML 解码后的插值表达式
+            content: decodeHtml(content)
+        }
+    }
 }
 
 function decodeHtml(rawText, asAttr = false) {
@@ -180,7 +252,95 @@ function decodeHtml(rawText, asAttr = false) {
         decodedText += rawText.slice(0, head.index)
         // 消费字符 & 之前的内容
         advance(head.index)
+
+        // 如果满足条件，则说明是命名字符引用，否则为数字字符引用
+        if (head[0] === '&') {
+            let name = ''
+            let value
+            if (/[0-9a-z]/i.test(rawText[1])) {
+                if (!maxCRNameLength) {
+                    maxCRNameLength = Object.keys(namedCharacterReferences).reduce(
+                        (max, name) => Math.max(max, name.length),
+                        0
+                    )
+                }
+                // 从最大长度开始对文本进行截取，并试图去引用表中找到对应的项
+                for (let length = maxCRNameLength; !value && length > 0; --length) {
+                    // 截取字符 & 到最大长度之间的字符作为实体名称
+                    name = rawText.substr(1, length)
+                    // 使用实体名称去索引表中查找对应项的值
+                    value = (namedCharacterReferences)[name]
+                }
+                // 如果找到了对应项的值，说明解码成功
+                if (value) {
+                    const semi = name.endsWith(';')
+                    // 如果解码的文本作为属性值，最后一个匹配的字符不是分号，
+                    //  并且最后一个匹配字符的下一个字符是等于号（=）、ASCII 字母或数字，
+                    //  由于历史原因，将字符 & 和实体名称 name 作为普通文本
+                    if (
+                        asAttr &&
+                        !semi &&
+                        /[=a-z0-9]/i.test(rawText[name.length + 1] || '')
+                    ) {
+                        decodedText += '&' + name
+                        advance(1 + name.length)
+                    } else {
+                        // 其他情况下，正常使用解码后的内容拼接到 decodedText 上
+                        decodedText += value
+                        advance(1 + name.length)
+                    }
+                } else {
+                    // 如果没有找到对应的值，说明解码失败
+                    decodedText += '&' + name
+                    advance(1 + name.length)
+                }
+            } else {
+                // 如果字符 & 的下一个字符不是 ASCII 字母或数字，
+                //  则将字符 & 作为普通文本
+                decodedText += '&'
+                advance(1)
+            }
+        } else {
+            // 判断是十进制表示还是十六进制表示
+            const hex = head[0] === '&#x'
+            const pattern = hex ? /^&#x([0-9a-f]+);?/i : /^&#([0-9]+);?/
+            // 最终，body[1] 的值就是 Unicode 码点
+            const body = pattern.exec(rawText)
+            if (body) {
+                // 根据对应的进制，将码点字符串转换为数字
+                const cp = Number.parseInt(body[1], hex ? 16 : 10)
+                // 码点的合法性检查
+                if (cp === 0) {
+                    cp = 0xfffd
+                } else if (cp > 0x10ffff) {
+                    // 如果码点值超过 Unicode 的最大值，替换为 0xfffd
+                    cp = 0xfffd
+                } else if (cp >= 0xd800 && cp <= 0xdfff) {
+                    // 如果码点值处于 surrogate pair 范围内，替换为 0xfffd
+                    cp = 0xfffd
+                } else if ((cp >= 0xfdd0 && cp <= 0xfdef) || (cp & 0xfffe) === 0xfffe) {
+                    // 如果码点值处于 noncharacter 范围内，则什么都不做，交给平台处理
+                } else if (
+                    // 控制字符集的范围是：[0x01, 0x1f] 加上 [0x7f, 0x9f]
+                    //  去掉 ASICC 空白符：0x09(TAB)、0x0A(LF)、0x0C(FF)
+                    //  0x0D(CR) 虽然也是 ASICC 空白符，但需要包含
+                    (cp >= 0x01 && cp <= 0x08) ||
+                    cp === 0x0b ||
+                    (cp >= 0x0d && cp <= 0x1f) ||
+                    (cp >= 0x7f && cp <= 0x9f)
+                ) {
+                    cp = CCR_REPLACEMENTS[cp] || cp
+                }
+                decodedText += String.fromCodePoint(cp)
+                advance(body[0].length)
+            } else {
+                decodedText += head[0]
+                advance(head[0].length)
+            }
+        }
+        
     }
+    return decodedText
 }
 
 function parseText(context) {
@@ -209,6 +369,8 @@ function parseText(context) {
         content: decodeHtml(content)
     }
 }
+
+// console.log(parseText(`foo {{bar}} baz`))
 
 function parseChildren(context, ancestors) {
     let nodes = []
@@ -264,7 +426,7 @@ function parse(str) {
             }
         }
     }
-    
+
     // 第一个参数是上下文对象 context
     //  第二个参数是由父代节点构成的节点栈，初始时栈为空
     const nodes = parseChildren(context, [])
@@ -277,5 +439,6 @@ function parse(str) {
     }
 }
 
+console.log(parse(`<div>foo {{bar}} baz</div>`))
 
 
